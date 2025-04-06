@@ -13,6 +13,7 @@
 - [Running Your Server](#running-your-server)
   - [stdio](#stdio)
   - [HTTP with SSE](#http-with-sse)
+  - [Browser Context](#browser-context)
   - [Testing and Debugging](#testing-and-debugging)
 - [Examples](#examples)
   - [Echo Server](#echo-server)
@@ -251,6 +252,95 @@ app.post("/messages", async (req: Request, res: Response) => {
 app.listen(3001);
 ```
 
+### Browser Context
+
+For browser-based applications, you can use the BrowserContextTransport to enable direct communication between MCP client and server components running in the same browser environment:
+
+```typescript
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { BrowserContextTransport } from "@modelcontextprotocol/sdk/browser-context-transport.js";
+import { z } from "zod";
+
+// Create a server
+const server = new McpServer({
+  name: "browser-server",
+  version: "1.0.0"
+});
+
+// Add a simple tool
+server.tool(
+  "greet",
+  { name: z.string() },
+  async ({ name }) => ({
+    content: [{ type: "text", text: `Hello, ${name}!` }]
+  })
+);
+
+// Create a client 
+const client = new Client(
+  { name: "browser-client", version: "1.0.0" },
+  { capabilities: { tools: {}, resources: {}, prompts: {} } }
+);
+
+// Create a connected pair of transports
+const [clientTransport, serverTransport] = BrowserContextTransport.createChannelPair();
+
+// Connect both ends
+await server.connect(serverTransport);
+await client.connect(clientTransport);
+await client.initialize();
+
+// Now we can use the client to call tools on the server
+const result = await client.callTool({
+  name: "greet",
+  arguments: { name: "World" }
+});
+console.log(result.content[0].text); // Outputs: "Hello, World!"
+```
+
+The BrowserContextTransport also provides support for more complex scenarios:
+
+#### Web Workers
+
+```typescript
+// In main script
+const worker = new Worker('mcp-worker.js');
+const transport = BrowserContextTransport.createWorkerTransport(worker);
+const client = new Client(/* ... */);
+await client.connect(transport);
+
+// In mcp-worker.js
+self.addEventListener('message', async (event) => {
+  if (event.data?.type === 'MCP_INIT_PORT') {
+    const port = event.ports[0];
+    const transport = new BrowserContextTransport(port);
+    const server = new McpServer(/* ... */);
+    await server.connect(transport);
+  }
+});
+```
+
+#### Cross-domain iframes
+
+```typescript
+// In parent document
+const iframe = document.getElementById('mcp-frame');
+const transport = BrowserContextTransport.createIframeTransport(iframe);
+const client = new Client(/* ... */);
+await client.connect(transport);
+
+// In iframe document
+window.addEventListener('message', (event) => {
+  if (event.data?.type === 'MCP_INIT_PORT') {
+    const port = event.ports[0];
+    const transport = new BrowserContextTransport(port);
+    const server = new McpServer(/* ... */);
+    await server.connect(transport);
+  }
+});
+```
+
 ### Testing and Debugging
 
 To test your server, you can use the [MCP Inspector](https://github.com/modelcontextprotocol/inspector). See its README for more information.
@@ -486,6 +576,24 @@ const result = await client.callTool({
   name: "example-tool",
   arguments: {
     arg1: "value"
+  }
+});
+```
+
+### Server Capabilities
+
+You can specify which capabilities your server provides:
+
+```typescript
+const server = new McpServer({
+  name: "Limited Server",
+  version: "1.0.0"
+}, {
+  capabilities: {
+    // Only support tools, not resources or prompts
+    tools: {},
+    resources: undefined,
+    prompts: undefined
   }
 });
 ```

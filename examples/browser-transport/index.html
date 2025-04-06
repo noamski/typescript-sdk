@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP Browser Context Transport Example</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem;
+            line-height: 1.6;
+        }
+        h1 {
+            color: #1a73e8;
+        }
+        .container {
+            display: flex;
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+        .panel {
+            flex: 1;
+            border: 1px solid #e1e4e8;
+            border-radius: 6px;
+            padding: 1rem;
+        }
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        input, button {
+            padding: 0.5rem;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+        button {
+            background-color: #1a73e8;
+            color: white;
+            cursor: pointer;
+            border: none;
+        }
+        button:hover {
+            background-color: #1557b0;
+        }
+        .logs {
+            background-color: #f6f8fa;
+            border-radius: 4px;
+            padding: 1rem;
+            min-height: 200px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', Courier, monospace;
+            white-space: pre-wrap;
+        }
+        .tool-response {
+            margin-top: 1rem;
+            padding: 1rem;
+            background-color: #e6f7ff;
+            border-radius: 4px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>MCP Browser Context Transport Example</h1>
+    <p>
+        This example demonstrates how to use the BrowserContextTransport to create a client and server
+        in the same browser context, enabling direct communication without a network connection.
+    </p>
+
+    <div class="container">
+        <div class="panel">
+            <h2>Client Controls</h2>
+            <div class="controls">
+                <div>
+                    <label for="nameInput">Name:</label>
+                    <input type="text" id="nameInput" value="World">
+                </div>
+                <button id="callToolBtn">Call Greet Tool</button>
+                <div id="toolResponse" class="tool-response"></div>
+            </div>
+        </div>
+        <div class="panel">
+            <h2>Logs</h2>
+            <div id="logs" class="logs"></div>
+        </div>
+    </div>
+
+    <script type="module">
+        // Note: In a real application, you would import from the actual MCP SDK
+        // This example assumes you've bundled the SDK with tools like webpack or vite
+        // For simplicity, we're using placeholder imports here
+        import { McpServer } from './mcp-server.js';
+        import { Client } from './mcp-client.js';
+        import { BrowserContextTransport } from './browser-context-transport.js';
+        import { z } from './zod.js';
+
+        // DOM Elements
+        const nameInput = document.getElementById('nameInput');
+        const callToolBtn = document.getElementById('callToolBtn');
+        const toolResponse = document.getElementById('toolResponse');
+        const logs = document.getElementById('logs');
+
+        // Logging function
+        function log(message) {
+            const now = new Date().toISOString().split('T')[1].split('.')[0];
+            logs.textContent += `[${now}] ${message}\n`;
+            logs.scrollTop = logs.scrollHeight;
+        }
+
+        async function initializeApp() {
+            log('Creating server...');
+            // Create an MCP server
+            const server = new McpServer({
+                name: "browser-demo-server",
+                version: "1.0.0"
+            });
+
+            // Add a greeting tool
+            server.tool(
+                "greet",
+                { name: z.string() },
+                async ({ name }) => {
+                    log(`Server: Executing greet tool with name="${name}"`);
+                    return {
+                        content: [{ type: "text", text: `Hello, ${name}! Welcome to the browser MCP demo.` }]
+                    };
+                }
+            );
+
+            log('Creating client...');
+            // Create an MCP client
+            const client = new Client(
+                { name: "browser-demo-client", version: "1.0.0" },
+                { capabilities: { tools: {}, resources: {}, prompts: {} } }
+            );
+
+            log('Creating transport channel pair...');
+            // Create a connected pair of transports
+            const [clientTransport, serverTransport] = BrowserContextTransport.createChannelPair();
+
+            log('Connecting server to transport...');
+            // Connect the server
+            await server.connect(serverTransport);
+
+            log('Connecting client to transport...');
+            // Connect the client
+            await client.connect(clientTransport);
+
+            log('Initializing client...');
+            // Initialize the client
+            await client.initialize();
+
+            log('App initialization complete!');
+
+            // Set up event handlers
+            callToolBtn.addEventListener('click', async () => {
+                const name = nameInput.value || 'World';
+                log(`Client: Calling tool "greet" with name="${name}"`);
+                
+                try {
+                    // Call the tool using the client
+                    const result = await client.callTool({
+                        name: "greet",
+                        arguments: { name }
+                    });
+
+                    // Display the result
+                    log(`Client: Received response: ${JSON.stringify(result)}`);
+                    toolResponse.style.display = 'block';
+                    toolResponse.textContent = result.content[0].text;
+                } catch (error) {
+                    log(`Error: ${error.message}`);
+                }
+            });
+        }
+
+        // Initialize the app
+        initializeApp().catch(error => {
+            log(`Error during initialization: ${error.message}`);
+            console.error(error);
+        });
+    </script>
+</body>
+</html>

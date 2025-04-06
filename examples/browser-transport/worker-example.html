@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP Web Worker Transport Example</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem;
+            line-height: 1.6;
+        }
+        h1 {
+            color: #1a73e8;
+        }
+        .container {
+            display: flex;
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+        .panel {
+            flex: 1;
+            border: 1px solid #e1e4e8;
+            border-radius: 6px;
+            padding: 1rem;
+        }
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        input, button, select {
+            padding: 0.5rem;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+        button {
+            background-color: #1a73e8;
+            color: white;
+            cursor: pointer;
+            border: none;
+        }
+        button:hover {
+            background-color: #1557b0;
+        }
+        .logs {
+            background-color: #f6f8fa;
+            border-radius: 4px;
+            padding: 1rem;
+            min-height: 200px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', Courier, monospace;
+            white-space: pre-wrap;
+        }
+        .tool-response {
+            margin-top: 1rem;
+            padding: 1rem;
+            background-color: #e6f7ff;
+            border-radius: 4px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>MCP Web Worker Transport Example</h1>
+    <p>
+        This example demonstrates how to use the BrowserContextTransport with Web Workers.
+        The client runs in the main thread, while the server runs in a separate worker thread.
+    </p>
+
+    <div class="container">
+        <div class="panel">
+            <h2>Client Controls</h2>
+            <div class="controls">
+                <div>
+                    <label for="toolSelect">Tool:</label>
+                    <select id="toolSelect">
+                        <option value="greet">Greet</option>
+                        <option value="calculate">Calculate</option>
+                    </select>
+                </div>
+                <div id="greetParams">
+                    <label for="nameInput">Name:</label>
+                    <input type="text" id="nameInput" value="World">
+                </div>
+                <div id="calcParams" style="display: none;">
+                    <div>
+                        <label for="numAInput">Number A:</label>
+                        <input type="number" id="numAInput" value="5">
+                    </div>
+                    <div>
+                        <label for="numBInput">Number B:</label>
+                        <input type="number" id="numBInput" value="7">
+                    </div>
+                    <div>
+                        <label for="opSelect">Operation:</label>
+                        <select id="opSelect">
+                            <option value="add">Add</option>
+                            <option value="subtract">Subtract</option>
+                            <option value="multiply">Multiply</option>
+                            <option value="divide">Divide</option>
+                        </select>
+                    </div>
+                </div>
+                <button id="callToolBtn">Call Tool</button>
+                <div id="toolResponse" class="tool-response"></div>
+            </div>
+        </div>
+        <div class="panel">
+            <h2>Logs</h2>
+            <div id="logs" class="logs"></div>
+        </div>
+    </div>
+
+    <script type="module">
+        // Note: In a real application, you would import from the actual MCP SDK
+        // This example assumes you've bundled the SDK with tools like webpack or vite
+        // For simplicity, we're using placeholder imports here
+        import { Client } from './mcp-client.js';
+        import { BrowserContextTransport } from './browser-context-transport.js';
+
+        // DOM Elements
+        const toolSelect = document.getElementById('toolSelect');
+        const greetParams = document.getElementById('greetParams');
+        const calcParams = document.getElementById('calcParams');
+        const nameInput = document.getElementById('nameInput');
+        const numAInput = document.getElementById('numAInput');
+        const numBInput = document.getElementById('numBInput');
+        const opSelect = document.getElementById('opSelect');
+        const callToolBtn = document.getElementById('callToolBtn');
+        const toolResponse = document.getElementById('toolResponse');
+        const logs = document.getElementById('logs');
+
+        // Logging function
+        function log(message) {
+            const now = new Date().toISOString().split('T')[1].split('.')[0];
+            logs.textContent += `[${now}] ${message}\n`;
+            logs.scrollTop = logs.scrollHeight;
+        }
+
+        // Show/hide parameter sections based on selected tool
+        toolSelect.addEventListener('change', () => {
+            const selectedTool = toolSelect.value;
+            if (selectedTool === 'greet') {
+                greetParams.style.display = 'block';
+                calcParams.style.display = 'none';
+            } else if (selectedTool === 'calculate') {
+                greetParams.style.display = 'none';
+                calcParams.style.display = 'block';
+            }
+        });
+
+        async function initializeApp() {
+            log('Creating web worker...');
+            // Create a Web Worker
+            const worker = new Worker('mcp-server-worker.js', { type: 'module' });
+            
+            log('Creating client...');
+            // Create an MCP client
+            const client = new Client(
+                { name: "browser-worker-client", version: "1.0.0" },
+                { capabilities: { tools: {}, resources: {}, prompts: {} } }
+            );
+
+            log('Creating worker transport...');
+            // Create a transport that connects to the worker
+            const transport = BrowserContextTransport.createWorkerTransport(worker);
+
+            log('Connecting client to transport...');
+            // Connect the client
+            await client.connect(transport);
+
+            log('Initializing client...');
+            // Initialize the client
+            await client.initialize();
+
+            // List available tools
+            const tools = await client.listTools();
+            log(`Available tools: ${tools.tools.map(t => t.name).join(', ')}`);
+
+            log('App initialization complete!');
+
+            // Set up call tool button handler
+            callToolBtn.addEventListener('click', async () => {
+                const selectedTool = toolSelect.value;
+                let toolName, toolArgs;
+
+                if (selectedTool === 'greet') {
+                    toolName = 'greet';
+                    toolArgs = { name: nameInput.value || 'World' };
+                    log(`Client: Calling tool "${toolName}" with name="${toolArgs.name}"`);
+                } else if (selectedTool === 'calculate') {
+                    toolName = 'calculate';
+                    const a = Number(numAInput.value) || 0;
+                    const b = Number(numBInput.value) || 0;
+                    const operation = opSelect.value;
+                    toolArgs = { a, b, operation };
+                    log(`Client: Calling tool "${toolName}" with a=${a}, b=${b}, operation=${operation}`);
+                }
+
+                try {
+                    // Call the tool using the client
+                    const result = await client.callTool({
+                        name: toolName,
+                        arguments: toolArgs
+                    });
+
+                    // Display the result
+                    log(`Client: Received response: ${JSON.stringify(result)}`);
+                    toolResponse.style.display = 'block';
+                    toolResponse.textContent = result.content[0].text;
+                } catch (error) {
+                    log(`Error: ${error.message}`);
+                    toolResponse.style.display = 'block';
+                    toolResponse.textContent = `Error: ${error.message}`;
+                }
+            });
+
+            // Listen for worker messages (for logging purposes)
+            worker.addEventListener('message', (event) => {
+                if (event.data.type === 'log') {
+                    log(`Worker: ${event.data.message}`);
+                }
+            });
+        }
+
+        // Initialize the app
+        initializeApp().catch(error => {
+            log(`Error during initialization: ${error.message}`);
+            console.error(error);
+        });
+    </script>
+</body>
+</html>
